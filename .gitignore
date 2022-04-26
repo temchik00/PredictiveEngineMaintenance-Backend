@@ -143,4 +143,5 @@ sql_app.db
 
 /notebooks
 /data
+/app/files/models/*.h5
 .vscode
