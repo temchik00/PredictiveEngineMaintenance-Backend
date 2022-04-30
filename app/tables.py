@@ -6,7 +6,6 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint
 )
-from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 
 
@@ -17,6 +16,7 @@ class Engine(Base):
     __tablename__ = 'engine'
     id = Column(Integer, primary_key=True)
     has_failed = Column(Boolean, nullable=False, default=False)
+    for_testing = Column(Boolean, nullable=False, default=False)
 
 
 class Cycle(Base):

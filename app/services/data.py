@@ -202,8 +202,12 @@ class DataService:
             self.session.add(failure_point)
         self.session.commit()
 
-    def __create_engine(self, has_failed: bool = False) -> tables.Engine:
-        engine = tables.Engine(has_failed=has_failed)
+    def __create_engine(
+        self,
+        has_failed: bool = False,
+        for_testing: bool = False
+    ) -> tables.Engine:
+        engine = tables.Engine(has_failed=has_failed, for_testing=for_testing)
         return engine
 
     def add_engine(self) -> tables.Engine:
@@ -243,11 +247,15 @@ class DataService:
         full_features = full_features.join(time_to_fail)
         return full_features
 
-    async def load_from_file(self, file: UploadFile):
+    async def load_from_file(
+        self,
+        file: UploadFile,
+        for_testing: bool = False
+    ):
         sensor_names = [f'sensor{i}' for i in range(1, 22)]
         data = await self.__get_data_from_file(file)
         for _, engine_data in data.groupby('engine_id'):
-            engine = self.__create_engine(True)
+            engine = self.__create_engine(True, for_testing)
 
             self.session.add(engine)
             self.session.flush()

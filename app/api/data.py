@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, status, Response, UploadFile, File
 from models.data import CycleAdd, Engine
 from services.data import DataService
@@ -9,9 +10,10 @@ router = APIRouter(prefix='/data')
 @router.post('/loadFromCSV', status_code=status.HTTP_204_NO_CONTENT)
 async def load_from_CSV(
     file: UploadFile = File(...),
+    for_testing: Optional[bool] = False,
     service: DataService = Depends(),
 ):
-    await service.load_from_file(file)
+    await service.load_from_file(file, for_testing)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
