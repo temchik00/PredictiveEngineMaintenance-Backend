@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, File, UploadFile, status
+from fastapi import APIRouter, Depends, status
 from services.prediction import PredictionService
-from models.prediction import ExpectedLifetime
+from models.prediction import ExpectedLifetime, TrainParameters, TrainResults
 
 
 router = APIRouter(prefix='/prediction')
@@ -19,16 +19,13 @@ def predict_lifetime(
     return ExpectedLifetime(expectedLifetime=prediction)
 
 
-@router.put('/model', status_code=status.HTTP_200_OK)
-def update_model(
-    model: UploadFile = File(...),
-    service: PredictionService = Depends(),
-):
-    ...
-
-
-@router.post('/train', status_code=status.HTTP_201_CREATED)
+@router.post(
+    '/train',
+    status_code=status.HTTP_201_CREATED,
+    response_model=TrainResults
+)
 def retrain_model(
+    parameters: TrainParameters,
     service: PredictionService = Depends(),
 ):
-    ...
+    return service.train_network(parameters)
