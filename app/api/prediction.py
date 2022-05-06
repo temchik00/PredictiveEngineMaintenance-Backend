@@ -7,7 +7,7 @@ router = APIRouter(prefix='/prediction')
 
 
 @router.get(
-    '/{engine_id}',
+    '/{engine_id}/',
     status_code=status.HTTP_200_OK,
     response_model=ExpectedLifetime
 )
@@ -20,7 +20,7 @@ def predict_lifetime(
 
 
 @router.post(
-    '/train',
+    '/train/',
     status_code=status.HTTP_201_CREATED,
     response_model=TrainResults
 )

@@ -307,3 +307,11 @@ class DataService:
             self.session.add_all(pcs)
         self.session.commit()
         return
+
+    def get_engine(self, engine_id: int) -> tables.Engine:
+        engine = self.session.query(tables.Engine)\
+            .filter_by(id=engine_id).first()
+        if not engine:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                detail=f"No engine with id {engine_id}")
+        return engine

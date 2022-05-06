@@ -7,7 +7,7 @@ from services.data import DataService
 router = APIRouter(prefix='/data')
 
 
-@router.post('/loadFromCSV', status_code=status.HTTP_204_NO_CONTENT)
+@router.post('/loadFromCSV/', status_code=status.HTTP_204_NO_CONTENT)
 async def load_from_CSV(
     file: UploadFile = File(...),
     for_testing: Optional[bool] = False,
@@ -17,7 +17,7 @@ async def load_from_CSV(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post('/cycle/{engine_id}', status_code=status.HTTP_204_NO_CONTENT)
+@router.post('/cycle/{engine_id}/', status_code=status.HTTP_204_NO_CONTENT)
 def add_cycle(
     engine_id: int,
     has_failed: bool,
@@ -28,11 +28,17 @@ def add_cycle(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post('/engine',
+@router.post('/engine/',
              status_code=status.HTTP_201_CREATED,
              response_model=Engine)
-def add_engine(
-    service: DataService = Depends()
-):
+def add_engine(service: DataService = Depends()):
     engine = service.add_engine()
+    return Engine(id=engine.id, hasFailed=engine.has_failed)
+
+
+@router.get('/engine/{engine_id}/',
+            status_code=status.HTTP_200_OK,
+            response_model=Engine)
+def get_engine(engine_id: int, service: DataService = Depends()):
+    engine = service.get_engine(engine_id)
     return Engine(id=engine.id, hasFailed=engine.has_failed)
