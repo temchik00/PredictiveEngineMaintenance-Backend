@@ -2,8 +2,10 @@ import io
 import numpy as np
 import pandas as pd
 from fastapi import Depends, status, HTTPException, UploadFile
+from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.orm import Session
-from typing import List, Dict
+from typing import List
 from database import get_session
 import tables
 from pickle import load
@@ -18,30 +20,18 @@ class DataService:
         with open('./app/files/other/pca.pkl', 'rb') as file:
             self.PCA = load(file)
 
-    def __group_sensors(
-        self,
-        sensors: List[tables.Sensor]
-    ) -> Dict[int, List[float]]:
-        splitted_sensors = {}
-        for sensor in sensors:
-            if splitted_sensors.get(sensor.cycle_id) is None:
-                splitted_sensors[sensor.cycle_id] = [sensor.value]
-            else:
-                splitted_sensors[sensor.cycle_id].append(sensor.value)
-        return splitted_sensors
-
     def __calc_sensors_avg(
         self,
-        sensors: Dict[int, List[float]]
+        sensors: List[List[float]]
     ) -> List[float]:
-        sensors = np.array(list(sensors.values()))
+        sensors = np.array(sensors)
         return np.average(sensors, axis=0).tolist()
 
     def __calc_sensors_std(
         self,
-        sensors: Dict[int, List[float]]
+        sensors: List[List[float]]
     ) -> List[float]:
-        sensors = np.array(list(sensors.values()))
+        sensors = np.array(sensors)
         return np.std(sensors, axis=0).tolist()
 
     def __add_principal_components(
@@ -52,7 +42,6 @@ class DataService:
     ) -> List[tables.PrincipalComponent]:
         principal_components = []
         for pc in pcs:
-
             principal_component =\
                 tables.PrincipalComponent(engine_id=engine_id,
                                           cycle_id=cycle_id,
@@ -64,37 +53,48 @@ class DataService:
         self,
         engine_id: int
     ) -> List[tables.PrincipalComponent]:
-        last_failure_point = self.session.query(tables.FailurePoint.cycle_id).\
-            filter_by(engine_id=engine_id).\
-            order_by(tables.FailurePoint.cycle_id.desc()).first()
+        last_failure_point = self.session.query(tables.FailurePoint.cycle_id)\
+            .filter_by(engine_id=engine_id)\
+            .order_by(tables.FailurePoint.cycle_id.desc()).first()
         if last_failure_point is None:
-            cycles_ids = self.session.query(tables.Cycle.id).\
-                filter_by(engine_id=engine_id).\
-                order_by(tables.Cycle.id.desc()).\
-                limit(settings.window_size).all()
+            cycles_ids = self.session.query(tables.Cycle.id)\
+                .filter_by(engine_id=engine_id)\
+                .order_by(tables.Cycle.id.desc())\
+                .limit(settings.window_size).all()
         else:
-            cycles_ids = self.session.query(tables.Cycle.id).\
-                filter_by(engine_id=engine_id).\
-                order_by(tables.Cycle.id.desc()).\
-                filter(tables.Cycle.id > last_failure_point).\
-                limit(settings.window_size).all()
+            cycles_ids = self.session.query(tables.Cycle.id)\
+                .filter_by(engine_id=engine_id)\
+                .order_by(tables.Cycle.id.desc())\
+                .filter(tables.Cycle.id > last_failure_point)\
+                .limit(settings.window_size).all()
         cycles_ids = [cycle_id for cycle_id, in cycles_ids]
-        sensors = self.session.query(tables.Sensor).\
-            filter_by(engine_id=engine_id).\
-            order_by(tables.Sensor.cycle_id.desc(), tables.Sensor.id.asc()).\
-            filter(tables.Sensor.cycle_id.in_(cycles_ids)).all()
-        splitted_sensors = self.__group_sensors(sensors)
-        sensors_avg = self.__calc_sensors_avg(splitted_sensors)
-        sensors_std = self.__calc_sensors_std(splitted_sensors)
+        sensor_values = \
+            self.session.query(
+                func.array_agg(aggregate_order_by(tables.Sensor.value,
+                                                  tables.Sensor.id.asc()))
+            )\
+            .filter_by(engine_id=engine_id)\
+            .order_by(tables.Sensor.cycle_id.desc())\
+            .filter(tables.Sensor.cycle_id.in_(cycles_ids))\
+            .group_by(tables.Sensor.cycle_id)\
+            .all()
+        sensor_values = [values for values in sensor_values]
+        sensors_avg = self.__calc_sensors_avg(sensor_values)
+        sensors_std = self.__calc_sensors_std(sensor_values)
         last_cycle = self.session.query(tables.Cycle).\
             filter_by(engine_id=engine_id).order_by(tables.Cycle.id.desc()).\
             first()
         cycle_data = [last_cycle.id, last_cycle.setting1,
                       last_cycle.setting2, last_cycle.setting3]
-        last_sensor_values = self.session.query(tables.Sensor.value).\
-            filter_by(engine_id=engine_id, cycle_id=last_cycle.id).\
-            order_by(tables.Sensor.id.asc()).all()
-        last_sensor_values = [value for value, in last_sensor_values]
+        last_sensor_values = \
+            self.session.query(
+                func.array_agg(aggregate_order_by(tables.Sensor.value,
+                                                  tables.Sensor.id.asc()))
+            )\
+            .filter_by(engine_id=engine_id, cycle_id=last_cycle.id)\
+            .order_by(tables.Sensor.id.asc())\
+            .group_by(tables.Sensor.cycle_id).first()
+        last_sensor_values = last_sensor_values[0]
         cycle_data += last_sensor_values
         cycle_data += sensors_avg
         cycle_data += sensors_std
@@ -136,15 +136,14 @@ class DataService:
         remaining_cycles = []
         last_cycle = self.session.query(tables.Cycle.id).\
             filter_by(engine_id=engine_id).order_by(tables.Cycle.id.desc()).\
-            first()
-        self.__process_last_cycle(engine_id)
+            first()[0]
         if last_failure_point is None:
             cycle_ids = self.session.query(tables.Cycle.id).\
                 filter_by(engine_id=engine_id).all()
         else:
             cycle_ids = self.session.query(tables.Cycle.id).\
                 filter_by(engine_id=engine_id).\
-                filter(tables.Cycle.id > last_failure_point).all()
+                filter(tables.Cycle.id > last_failure_point[0]).all()
         for cycle_id in cycle_ids:
             remaining_cycles.append(
                 tables.RemainingCycles(

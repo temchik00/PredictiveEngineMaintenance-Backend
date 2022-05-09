@@ -5,8 +5,10 @@ import tensorflow as tf
 from tensorflow import keras
 from keras import layers
 from fastapi import Depends, status, HTTPException
+from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.orm import Session
-from typing import List, Dict
+from typing import List, Dict, Tuple
 from sklearn.metrics import r2_score
 import tables
 from database import get_session
@@ -20,8 +22,24 @@ class PredictionService:
         self.session.autoflush = False
 
     def __get_engine_top_cycles_ids(self, engine_id: int) -> List[int]:
+        failure_points = self.session.query(tables.FailurePoint.cycle_id)\
+            .filter_by(engine_id=engine_id)\
+            .order_by(tables.FailurePoint.cycle_id.desc()).all()
+        if failure_points and len(failure_points) > 0:
+            last_failure_point = failure_points[-1][0]
+        else:
+            last_failure_point = 0
+        last_cycle_id = self.session.query(func.max(tables.Cycle.id))\
+            .filter_by(engine_id=engine_id).scalar()
+        if last_failure_point == last_cycle_id:
+            if len(failure_points) == 1:
+                last_failure_point = 0
+            else:
+                last_failure_point = failure_points[-2][0]
         cycle_ids = self.session.query(tables.Cycle.id)\
-            .filter_by(engine_id=engine_id).order_by(tables.Cycle.id.desc())\
+            .filter_by(engine_id=engine_id)\
+            .filter(tables.Cycle.id > last_failure_point)\
+            .order_by(tables.Cycle.id.desc())\
             .limit(settings.sequence_size).all()
         if cycle_ids is None or len(cycle_ids) != settings.sequence_size:
             raise HTTPException(
@@ -35,18 +53,8 @@ class PredictionService:
         engine_id: int
     ) -> Dict[int, List[float]]:
         cycle_ids = self.__get_engine_top_cycles_ids(engine_id)
-        data = self.session.query(tables.PrincipalComponent)\
-            .filter_by(engine_id=engine_id)\
-            .filter(tables.PrincipalComponent.cycle_id.in_(cycle_ids))\
-            .order_by(tables.PrincipalComponent.id.asc()).all()
-        grouped_data = {}
-        for component in data:
-            cycle_id = component.cycle_id
-            if grouped_data.get(cycle_id) is None:
-                grouped_data[cycle_id] = [component.value]
-            else:
-                grouped_data[cycle_id].append(component.value)
-        return grouped_data
+        PCs = self.__get_PCs(engine_id, cycle_ids)
+        return PCs
 
     def predict_lifetime(self, engine_id: int) -> int:
         if not exists('./app/files/models/current.h5'):
@@ -59,9 +67,9 @@ class PredictionService:
         if not engine_exists:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                                 detail=f"No engine with id {engine_id}")
-        grouped_data = self.__get_engine_top_cycles(engine_id)
-        data = np.array(list(grouped_data.values()))\
+        data = np.array(self.__get_engine_top_cycles(engine_id))\
             .reshape(1, settings.sequence_size, -1)
+
         with tf.device('/GPU:0'):
             model = keras.models.load_model('./app/files/models/current.h5')
             prediction = (np.rint(model.predict(data)))[0][0]
@@ -71,69 +79,111 @@ class PredictionService:
         self,
         engine_id: int,
         cycle_ids: List[int]
-    ) -> List[List[float]]:
-        PCs = self.session.query(tables.PrincipalComponent)\
+    ) -> List[Tuple[20 * (float, )]]:
+        PCs = self.session\
+            .query(func.array_agg(
+                aggregate_order_by(tables.PrincipalComponent.value,
+                                   tables.PrincipalComponent.id.asc())
+            ))\
             .filter_by(engine_id=engine_id)\
             .filter(tables.PrincipalComponent.cycle_id.in_(cycle_ids))\
-            .order_by(tables.PrincipalComponent.cycle_id.asc(),
-                      tables.PrincipalComponent.id.asc()).all()
-        splitted_pcs = {}
-        for PC in PCs:
-            if splitted_pcs.get(PC.cycle_id) is None:
-                splitted_pcs[PC.cycle_id] = [PC.value]
-            else:
-                splitted_pcs[PC.cycle_id].append(PC.value)
-        return list(splitted_pcs.values())
+            .order_by(tables.PrincipalComponent.cycle_id.asc())\
+            .group_by(tables.PrincipalComponent.cycle_id)\
+            .all()
+        PCs = [row for row, in PCs]
+        return PCs
 
-    def __get_remaining_cycles(
+    def __get_PCs_from_range(
         self,
         engine_id: int,
-        cycle_ids: List[int]
-    ) -> List[float]:
-        remaining_cycles = self.session.query(tables.RemainingCycles.count)\
+        cycle_id_start: int,
+        cycle_id_end: int
+    ) -> List[Tuple[20 * (float, )]]:
+        PCs = self.session\
+            .query(func.array_agg(
+                aggregate_order_by(tables.PrincipalComponent.value,
+                                   tables.PrincipalComponent.id.asc())
+            ))\
             .filter_by(engine_id=engine_id)\
-            .filter(tables.RemainingCycles.cycle_id.in_(cycle_ids))\
-            .order_by(tables.RemainingCycles.engine_id.asc(),
-                      tables.RemainingCycles.cycle_id.asc()).all()
-        return [count for count, in remaining_cycles]
+            .filter(tables.PrincipalComponent.cycle_id >= cycle_id_start,
+                    tables.PrincipalComponent.cycle_id <= cycle_id_end)\
+            .order_by(tables.PrincipalComponent.cycle_id.asc())\
+            .group_by(tables.PrincipalComponent.cycle_id)\
+            .all()
+        PCs = [row for row, in PCs]
+        return PCs
 
-    def __get_failed_data(self, for_testing: bool = False):
+    def __get_failed_ids(
+        self,
+        for_testing: bool = False
+    ) -> Dict[int, List[Tuple[int, int]]]:
         engine_ids = self.session.query(tables.Engine.id)\
             .filter_by(has_failed=True, for_testing=for_testing).all()
-        features = []
-        labels = []
+        ids = {}
         for engine_id, in engine_ids:
-            cycle_ids = self.session.query(tables.Cycle.id)\
-                .filter_by(engine_id=engine_id).all()
-            if len(cycle_ids) < settings.sequence_size:
-                continue
-            cycle_ids = [id for id, in cycle_ids]
-            PCs = self.__get_PCs(engine_id, cycle_ids)
-            features += PCs
-            remaining_cycles = self.__get_remaining_cycles(engine_id,
-                                                           cycle_ids)
-            labels += remaining_cycles
-        features = np.array(features)
-        labels = np.array(labels)
-        return features, labels
+            failure_points = self.session.query(tables.FailurePoint.cycle_id)\
+                .filter_by(engine_id=engine_id)\
+                .order_by(tables.FailurePoint.cycle_id.asc()).all()
+            failure_points = [point for point, in failure_points]
+            cycle_ids = []
+            if failure_points[0] >= settings.sequence_size:
+                cycle_ids.append((0, failure_points[0]))
+            for i in range(1, len(failure_points)):
+                failure_point = failure_points[i]
+                previous_point = failure_points[i - 1]
+                if failure_point - previous_point < settings.sequence_size:
+                    continue
+                cycle_ids.append((previous_point + 1, failure_point))
+            ids[engine_id] = cycle_ids
+        return ids
 
-    def __get_training_data(self):
-        features, labels = self.__get_failed_data(for_testing=False)
-        if labels.shape[0] < 5:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Not enough data to train model"
-            )
-        return features, labels
+    def __get_remaining_cycles_from_range(
+        self,
+        engine_id: int,
+        id_start: int,
+        id_end: int
+    ) -> List[int]:
+        remaining_cycles = self.session.query(tables.RemainingCycles.count)\
+            .filter_by(engine_id=engine_id)\
+            .filter(tables.RemainingCycles.cycle_id >= id_start,
+                    tables.RemainingCycles.cycle_id <= id_end)\
+            .order_by(tables.RemainingCycles.cycle_id.asc()).all()
+        return [count for count, in remaining_cycles]
 
-    def __get_testing_data(self):
-        features, labels = self.__get_failed_data(for_testing=True)
-        if labels.shape[0] < 5:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Not enough data to test model"
+    def __create_dataset(
+        self,
+        ids: Dict[int, List[Tuple[int, int]]],
+        params: TrainParameters,
+        for_testing: bool = False
+    ) -> tf.data.Dataset:
+        sequence_size = settings.sequence_size
+
+        def generator():
+            for engine_id, cycle_ids in ids.items():
+                for start_id, end_id in cycle_ids:
+                    features = self.__get_PCs_from_range(engine_id, start_id,
+                                                         end_id)
+                    features = np.array(features)
+                    labels = self.__get_remaining_cycles_from_range(engine_id,
+                                                                    start_id,
+                                                                    end_id)
+                    labels = np.array(labels)
+                    for i in range(features.shape[0] - sequence_size - 1):
+                        yield (features[i: i + sequence_size],
+                               labels[i + sequence_size])
+        n_features = 20
+        dataset = tf.data.Dataset.from_generator(
+            generator,
+            output_signature=(
+                tf.TensorSpec(shape=(settings.sequence_size, n_features),
+                              dtype=tf.float32),
+                tf.TensorSpec(shape=(), dtype=tf.int32),
             )
-        return features, labels
+        )
+        if not for_testing:
+            dataset = dataset.batch(params.batchSize)
+        dataset = dataset.prefetch(tf.data.AUTOTUNE)
+        return dataset, n_features
 
     def __create_neural_network(
         self,
@@ -158,50 +208,6 @@ class PredictionService:
         optimizer = keras.optimizers.Adam(learning_rate=learning_rate)
         model.compile(optimizer=optimizer, loss='mse')
         return model
-
-    def __create_train_dataset(self, params):
-        features, labels = self.__get_training_data()
-        n_features = features.shape[1]
-
-        def generate_sequences(features, labels):
-            sequence_size = settings.sequence_size
-            for timestep in range(features.shape[0] - sequence_size - 1):
-                yield features[timestep: timestep + sequence_size],\
-                    labels[timestep + sequence_size - 1]
-
-        dataset = tf.data.Dataset.from_generator(
-            generate_sequences,
-            output_signature=(
-                tf.TensorSpec(shape=(settings.sequence_size, n_features),
-                              dtype=tf.float32),
-                tf.TensorSpec(shape=(), dtype=tf.int32),
-            ),
-            args=(features, labels)
-        )
-        dataset = dataset.batch(params.batchSize)
-        dataset = dataset.prefetch(tf.data.AUTOTUNE)
-        return dataset, n_features
-
-    def __create_test_dataset(self, features, labels):
-        n_features = features.shape[1]
-
-        def generate_sequences(features):
-            sequence_size = settings.sequence_size
-            for timestep in range(features.shape[0] - sequence_size - 1):
-                yield features[timestep: timestep + sequence_size],\
-                    labels[timestep + sequence_size - 1]
-
-        dataset = tf.data.Dataset.from_generator(
-            generate_sequences,
-            output_signature=(
-                tf.TensorSpec(shape=(settings.sequence_size, n_features),
-                              dtype=tf.float32),
-                tf.TensorSpec(shape=(), dtype=tf.int32),
-            ),
-            args=(features, )
-        )
-        dataset = dataset.prefetch(tf.data.AUTOTUNE)
-        return dataset
 
     def __train_network(
         self,
@@ -235,10 +241,11 @@ class PredictionService:
         return filename
 
     def train_network(self, params: TrainParameters) -> TrainResults:
-        train_dataset, n_features = self.__create_train_dataset(params)
-        test_features, test_labels = self.__get_testing_data()
-        test_dataset = self.__create_test_dataset(test_features, test_labels)
-        test_labels = np.array([y for _, y in test_dataset])
+        ids = self.__get_failed_ids(for_testing=False)
+        train_dataset, n_features = self.__create_dataset(ids, params, False)
+        ids = self.__get_failed_ids(for_testing=True)
+        test_dataset, n_features = self.__create_dataset(ids, params, True)
+        test_labels = np.array([label for _, label in test_dataset])
         test_dataset = test_dataset.batch(params.batchSize)
         model = self.__train_network(train_dataset, n_features, params)
         model_name = self.__save_model(model)
