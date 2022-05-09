@@ -26,14 +26,14 @@ class DataService:
         sensors: List[List[float]]
     ) -> List[float]:
         sensors = np.array(sensors)
-        return np.average(sensors, axis=0).tolist()
+        return np.average(sensors, axis=0).tolist()[0]
 
     def __calc_sensors_std(
         self,
         sensors: List[List[float]]
     ) -> List[float]:
         sensors = np.array(sensors)
-        return np.std(sensors, axis=0).tolist()
+        return np.std(sensors, axis=0).tolist()[0]
 
     def __add_principal_components(
         self,
@@ -93,7 +93,6 @@ class DataService:
                                                   tables.Sensor.id.asc()))
             )\
             .filter_by(engine_id=engine_id, cycle_id=last_cycle.id)\
-            .order_by(tables.Sensor.id.asc())\
             .group_by(tables.Sensor.cycle_id).first()
         last_sensor_values = last_sensor_values[0]
         cycle_data += last_sensor_values
@@ -150,7 +149,7 @@ class DataService:
                 tables.RemainingCycles(
                     engine_id=engine_id,
                     cycle_id=cycle_id[0],
-                    count=last_cycle[0]-cycle_id[0]
+                    count=last_cycle-cycle_id[0]
                 )
             )
         return remaining_cycles
@@ -324,3 +323,23 @@ class DataService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                                 detail=f"No engine with id {engine_id}")
         return engine
+
+    async def load_cycles_from_file(self, engine_id: int, file: UploadFile):
+        engine_exists = self.session.query(tables.Engine.id).\
+                        filter_by(id=engine_id).first() is not None
+        if not engine_exists:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                detail=f"No engine with id {engine_id}")
+        content = await file.read()
+        content = str(content, 'utf-8').strip().split('\n')
+        for line in content:
+            values = line.split(' ')
+            setting1 = float(values[0])
+            setting2 = float(values[1])
+            setting3 = float(values[2])
+            sensors = [float(value) for value in values[3:]]
+            self.add_cycle(engine_id,
+                           CycleAdd(setting1=setting1,
+                                    setting2=setting2,
+                                    setting3=setting3,
+                                    sensorValues=sensors), False)

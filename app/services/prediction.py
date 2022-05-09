@@ -44,7 +44,7 @@ class PredictionService:
         engine_id: int,
         cycle_id_start: int,
         cycle_id_end: int
-    ) -> List[Tuple[20 * (float, )]]:
+    ) -> List[Tuple[21 * (float, )]]:
         PCs = self.session\
             .query(func.array_agg(
                 aggregate_order_by(tables.PrincipalComponent.value,
@@ -230,7 +230,7 @@ class PredictionService:
         for prediction in predictions:
             history.append(CycleLifetime(cycleId=prediction.cycle_id,
                                          lifetime=prediction.count))
-        if len(history):
+        if len(history) == 0:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"No prediction history for engine with id {engine_id}"

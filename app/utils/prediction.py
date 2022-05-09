@@ -15,7 +15,7 @@ def get_PCs(
     session: Session,
     engine_id: int,
     cycle_ids: List[int]
-) -> List[Tuple[20 * (float, )]]:
+) -> List[Tuple[21 * (float, )]]:
     PCs = session\
         .query(func.array_agg(
             aggregate_order_by(tables.PrincipalComponent.value,

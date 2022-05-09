@@ -42,3 +42,14 @@ def add_engine(service: DataService = Depends()):
 def get_engine(engine_id: int, service: DataService = Depends()):
     engine = service.get_engine(engine_id)
     return Engine(id=engine.id, hasFailed=engine.has_failed)
+
+
+@router.post('/cyclesFromFile/{engine_id}/',
+             status_code=status.HTTP_204_NO_CONTENT)
+async def load_cycles_from_file(
+    engine_id: int,
+    file: UploadFile = File(...),
+    service: DataService = Depends(),
+):
+    await service.load_cycles_from_file(engine_id, file)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
