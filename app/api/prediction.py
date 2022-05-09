@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, status
 from services.prediction import PredictionService
-from models.prediction import ExpectedLifetime, TrainParameters, TrainResults
+from models.prediction import (ExpectedLifetime, TrainParameters,
+                               TrainResults, ExpectedLifetimeHistory)
 
 
 router = APIRouter(prefix='/prediction')
@@ -29,3 +30,12 @@ def retrain_model(
     service: PredictionService = Depends(),
 ):
     return service.train_network(parameters)
+
+
+@router.get('/history/{engine_id}/', status_code=status.HTTP_200_OK,
+            response_model=ExpectedLifetimeHistory)
+def get_prediction_history(
+    engine_id: int,
+    service: PredictionService = Depends()
+):
+    return service.get_prediction_history(engine_id)

@@ -1,3 +1,4 @@
+from typing import List
 from pydantic import BaseModel
 
 
@@ -16,3 +17,12 @@ class TrainResults(BaseModel):
     modelName: str
     isBetter: bool
     score: float
+
+
+class CycleLifetime(BaseModel):
+    lifetime: int
+    cycleId: int
+
+
+class ExpectedLifetimeHistory(BaseModel):
+    history: List[CycleLifetime]

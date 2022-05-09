@@ -78,3 +78,14 @@ class RemainingCycles(Base):
         ['cycle_id', 'engine_id'],
         ['cycle.id', 'cycle.engine_id']
     )
+
+
+class PredictedCycles(Base):
+    __tablename__ = 'predicted_cycles'
+    engine_id = Column(Integer, primary_key=True)
+    cycle_id = Column(Integer, primary_key=True)
+    count = Column(Integer, nullable=False)
+    ForeignKeyConstraint(
+        ['cycle_id', 'engine_id'],
+        ['cycle.id', 'cycle.engine_id']
+    )

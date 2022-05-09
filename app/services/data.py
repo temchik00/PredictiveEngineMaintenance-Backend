@@ -11,6 +11,7 @@ import tables
 from pickle import load
 from models.data import CycleAdd
 from settings import settings
+from utils.prediction import predict_last_cycle
 
 
 class DataService:
@@ -200,6 +201,15 @@ class DataService:
             failure_point = self.__add_failure_point(engine_id, cycle.id)
             self.session.add(failure_point)
         self.session.commit()
+        try:
+            predicted_lifetime = predict_last_cycle(self.session, engine_id)
+            prediction = tables.PredictedCycles(engine_id=engine_id,
+                                                cycle_id=cycle.id,
+                                                count=predicted_lifetime)
+            self.session.add(prediction)
+            self.session.commit()
+        except HTTPException:
+            pass
 
     def __create_engine(
         self,
