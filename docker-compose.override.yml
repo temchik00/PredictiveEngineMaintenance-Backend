@@ -6,7 +6,7 @@ services:
         command: bash -c "python ./app/create_tables.py && python ./app/__main__.py"
         environment:
             DATABASE_URL: "postgresql://postgres:password@database:5432/PredictiveMaintenance"
-            DEVELOPMENT_MODE: True
+            DEVELOPMENT_MODE: 1
             SERVER_PORT: 8000
             WINDOW_SIZE: 10
             SEQUENCE_SIZE: 50

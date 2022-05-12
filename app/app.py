@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from settings import settings
 
 app = FastAPI()
-app.include_router(router)
+app.include_router(router, root_path=settings.root_path)
 
 if settings.development_mode:
     app.add_middleware(

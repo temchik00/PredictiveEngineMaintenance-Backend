@@ -2,6 +2,7 @@ from pydantic import BaseSettings
 
 
 class Settings(BaseSettings):
+    root_path: str = ''
     development_mode: bool = True
     server_port: int
     database_url: str

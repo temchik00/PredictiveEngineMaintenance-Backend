@@ -6,5 +6,5 @@ if __name__ == '__main__':
         'app:app',
         host='0.0.0.0',
         port=settings.server_port,
-        reload=True
+        reload=settings.development_mode
     )
