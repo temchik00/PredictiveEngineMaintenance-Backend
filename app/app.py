@@ -3,8 +3,8 @@ from api import router
 from fastapi.middleware.cors import CORSMiddleware
 from settings import settings
 
-app = FastAPI()
-app.include_router(router, root_path=settings.root_path)
+app = FastAPI(root_path=settings.root_path)
+app.include_router(router)
 
 if settings.development_mode:
     app.add_middleware(
