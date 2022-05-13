@@ -81,7 +81,6 @@ def predict_last_cycle(session: Session, engine_id: int) -> int:
     data = np.array(get_engine_top_cycles(session, engine_id))\
         .reshape(1, settings.sequence_size, -1)
 
-    with tf.device('/GPU:0'):
-        model = keras.models.load_model('./app/files/models/current.h5')
-        prediction = int(np.rint(model.predict(data)).astype(int)[0][0])
+    model = keras.models.load_model('./app/files/models/current.h5')
+    prediction = int(np.rint(model.predict(data)).astype(int)[0][0])
     return prediction

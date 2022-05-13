@@ -109,3 +109,4 @@ app/database/migrations/versions/*
 /notebooks
 /data
 explore-requirements.txt
+/.noteboks-venv

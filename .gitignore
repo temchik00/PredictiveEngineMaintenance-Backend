@@ -145,3 +145,4 @@ sql_app.db
 /data
 /app/files/models/*.h5
 .vscode
+/.noteboks-venv
